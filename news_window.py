@@ -2,12 +2,17 @@ import urllib
 from Tkinter import *
 import requests
 import webbrowser
+import time
+import concurrent.futures
 from PIL import ImageTk,Image
 from urlparse import urlparse
 from io import BytesIO
 from news_manager import NewsManager
 from preferences import Preferences
 from functools import partial
+
+
+ARTICLE_LIST = []
 
 class Article(object):
 
@@ -36,8 +41,8 @@ def get_image(img_url):
     response = requests.get(img_url)
     img = Image.open(BytesIO(response.content))
     img = img.resize((200,200), Image.ANTIALIAS)
-    photoImg =  ImageTk.PhotoImage(img)
-    return photoImg
+    #photoImg =  ImageTk.PhotoImage(img)
+    return img
 
 def process_article(a):
     print("Article dic is {}".format(a))
@@ -49,15 +54,22 @@ def process_article(a):
         image_url = "https://picsum.photos/200/200"
     photo_img = get_image(image_url)
     a_obj = Article(news_title, photo_img, news_description, news_url)
+
     return a_obj
 
 def process_articles(articles):
     article_objs = []
-    for a in articles:
-        a_obj = process_article(a)
-        article_objs.append(a_obj)
-    return article_objs
+    future_list = []
 
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        for a in articles:
+            f = executor.submit(process_article, a)
+            future_list.append(f)
+
+    for f in concurrent.futures.as_completed(future_list):
+        article_objs.append(f.result())
+
+    return article_objs
 
 class NewsWindow(Frame):
     def __fetch_news(self):
@@ -65,7 +77,7 @@ class NewsWindow(Frame):
         for p in self.pref.get_preferences().split(","):
             d = {"q": p}
             articles.extend(self.news_manager.fetch_news(d))
-        return process_articles(articles[:3])
+        return process_articles(articles)
 
 
     def __init__(self, pref, master=None):
@@ -95,7 +107,7 @@ class NewsWindow(Frame):
         self.news_frame.pack(fill=X)
         self.canvas.pack()
         #self.img = self.get_image(article.get("urlToImage", "https://picsum.photos/200/200"))
-        self.img = article.get_photo_img()
+        self.img = ImageTk.PhotoImage(article.get_photo_img())
         self.canvas.create_image(0, 0, anchor=NW, image=self.img)
         self.lbl1 = Label(self.news_frame, text=article.get_title(), font=('Helvetica', 20, 'bold'), wraplength=500, justify="center")
         self.lbl1.pack(anchor = 'center', padx=5, pady=5)
@@ -108,10 +120,11 @@ class NewsWindow(Frame):
 
 
     def load_next_news(self):
-        self.load_news_frame(self.articles[self.current_article_index])
-        self.current_article_index += 1
-        if self.current_article_index >= len(self.articles):
-            self.current_article_index = 0
+        if len(self.articles) > 0:
+            self.load_news_frame(self.articles[self.current_article_index])
+            self.current_article_index += 1
+            if self.current_article_index >= len(self.articles):
+                self.current_article_index = 0
 
     def __createWidgets(self):
         '''
